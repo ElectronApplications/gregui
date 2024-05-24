@@ -158,7 +158,7 @@ local function recursive_render(node_key, x, y, w, h)
     local element = global_context[node_key].element
 
     if element.type == "composable" then
-        recursive_render(global_context[node_key].children[1], x, y, w, h)
+        recursive_render(global_context[node_key].children[1], global_context[node_key].x, global_context[node_key].y, global_context[node_key].width, global_context[node_key].height)
     else
         element.draw(Renderer(x, y, w, h), util.map(global_context[node_key].children, function(child_key)
             return {

@@ -39,11 +39,11 @@ return function(x, y, w, h)
     end
 
     function Renderer.set_background(color)
-        return gpu.set_background(color)
+        return gpu.setBackground(color)
     end
 
     function Renderer.set_foreground(color)
-        return gpu.set_foreground(color)
+        return gpu.setForeground(color)
     end
 
     function Renderer.set(self, x, y, value, vertical)

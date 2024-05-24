@@ -1,7 +1,7 @@
 local gui = require("gregui.gui")
 
 ---@class BoxProps
----@field element Element
+---@field content Element
 ---@field padding_left integer
 ---@field padding_right integer
 ---@field padding_top integer
@@ -26,7 +26,7 @@ return function(props)
 
     return gui.create_drawable_element(
         function (prepare_callback)
-            local w, h = prepare_callback(props.element)
+            local w, h = prepare_callback(props.content)
             
             local width = nil
             local height = nil
