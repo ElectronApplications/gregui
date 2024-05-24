@@ -1,14 +1,14 @@
 local gui = require("gregui.gui")
-local Surface = require("gregui.components.Surface")
-local Box = require("gregui.components.Box")
+local Button = require("gregui.components.Button")
+local Text = require("gregui.components.Text")
 
----@class ButtonProps
----@field content Element
+---@class TextButtonProps
+---@field text string
 ---@field on_click function
 ---@field background integer
 ---@field foreground integer
 
----@param props ButtonProps
+---@param props TextButtonProps
 ---@return Element
 return function(props)
     setmetatable(props, {
@@ -19,23 +19,16 @@ return function(props)
     })
 
     return gui.create_element(
-        Surface,
+        Button,
         {
             content = gui.create_element(
-                Box,
+                Text,
                 {
-                    content = props.content,
-                    padding_left = 1,
-                    padding_right = 1,
-                    padding_top = 1,
-                    padding_bottom = 1
+                    text = props.text
                 }
             ),
             background = props.background,
             foreground = props.foreground,
-            elevation = 1
-        },
-        {
             on_click = props.on_click
         }
     )
