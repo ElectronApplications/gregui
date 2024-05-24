@@ -26,4 +26,10 @@ function util.filter(table, f)
   return result
 end
 
+---@param func function
+---@return string
+function util.func_tostring(func)
+  return string.sub(tostring(func), 11)
+end
+
 return util

@@ -1,10 +1,11 @@
 local math = require("math")
 
-local component = require("component")
 local event = require("event")
+local component = require("component")
 local gpu = component.gpu
 
 local util = require("gregui.util")
+local Renderer = require("gregui.renderer")
 
 local gui = {}
 
@@ -24,15 +25,15 @@ local global_events = {}
 ---@field events table<string, function>?
 ---@field key (string | number)?
 
----@alias coordinates_callback_function fun(width: integer, height: integer): (integer, integer)
----@alias render_callback_function fun(element: Element, max_width: integer, max_height: integer, coordinates_callback: coordinates_callback_function)
----@alias render_function fun(width: integer, height: integer, render_callback: render_callback_function): (integer, integer)
+---@alias prepare_callback_function fun(element: Element): (integer | nil, integer | nil)
+---@alias prepare_function fun(prepare_callback: prepare_callback_function): (integer | nil, integer | nil)
+
+---@alias draw_function fun(renderer: Renderer, children: { w: integer, h: integer, draw_callback: fun(x: integer, y: integer, w: integer?, h: integer?) }[])
 
 ---@class DrawableElement
 ---@field type "drawable"
----@field render render_function
----@field max_width integer
----@field max_height integer
+---@field prepare prepare_function
+---@field draw draw_function
 ---@field events table<string, function>?
 ---@field key (string | number)?
 
@@ -54,29 +55,24 @@ function gui.create_element(element, props, events, key)
     }
 end
 
----@param render render_function
----@param max_width integer
----@param max_height integer
+---@param prepare prepare_function
+---@param draw draw_function
 ---@param events table<string, function>?
 ---@param key (string | number)?
 ---@return DrawableElement
-function gui.create_drawable_element(render, max_width, max_height, events, key)
+function gui.create_drawable_element(prepare, draw, events, key)
     return {
         type = "drawable",
-        render = render,
-        max_width = max_width,
-        max_height = max_height,
+        prepare = prepare,
+        draw = draw,
         events = events,
         key = key
     }
 end
 
 ---@param node Element
----@param max_width integer
----@param max_height integer
----@param coordinates_callback coordinates_callback_function
----@return { node_key: string, frame: { x: integer, y: integer, w: integer, h: integer } }
-local function recursive_render(node, max_width, max_height, coordinates_callback)
+---@return { node_key: string, w: integer, h: integer }
+local function recursive_build(node)
     local node_key = global_parent .. "_" .. global_id
     
     if node.key ~= nil then
@@ -86,7 +82,7 @@ local function recursive_render(node, max_width, max_height, coordinates_callbac
     end
 
     if node.type == "composable" then
-        node_key = node_key .. "_" .. string.sub(tostring(node.element), 11)
+        node_key = node_key .. "_" .. util.func_tostring(node.element)
     end
     
     if node.events ~= nil then
@@ -103,71 +99,92 @@ local function recursive_render(node, max_width, max_height, coordinates_callbac
         global_context[node_key] = {
             rendered = true,
             states = {},
-            pass_frame = true,
-            local_frame = {},
-            children = {}
+            children = {},
+            element = node
         }
     else
         global_context[node_key].rendered = true
         global_context[node_key].children = {}
+        global_context[node_key].element = node
     end
 
     if node.type == "composable" then
-        local child_info = recursive_render(node.element(node.props), max_width, max_height, coordinates_callback)
-        global_context[node_key].pass_frame = false
-        global_context[node_key].local_frame = child_info.frame
+        local child_info = recursive_build(node.element(node.props))
+        global_context[node_key].width = child_info.w
+        global_context[node_key].height = child_info.h
         global_context[node_key].children = { child_info.node_key }
     else
-        local width = (node.max_width < 0 and { max_width } or { math.min(node.max_width, max_width) })[1]
-        local height = (node.max_height < 0 and { max_height } or { math.min(node.max_height, max_height) })[1]
-
-        local current_buffer = gpu.getActiveBuffer()
-        local buffer = gpu.allocateBuffer(width, height)
-        gpu.setActiveBuffer(buffer)
-
-        width, height = node.render(width, height, function(element, max_width, max_height, coordinates_callback)
-            local child_info = recursive_render(element, max_width, max_height, coordinates_callback)
+        local width, height = node.prepare(function(element)
+            local child_info = recursive_build(element)
             table.insert(global_context[node_key].children, child_info.node_key)
+            return child_info.w, child_info.h
         end)
 
-        local x, y = coordinates_callback(width, height)
-        gpu.bitblt(current_buffer, x, y, width, height, buffer, 1, 1)
-
-        gpu.setActiveBuffer(current_buffer)
-        gpu.freeBuffer(buffer)
-
-        global_context[node_key].local_frame = {
-            x = x,
-            y = y,
-            w = width,
-            h = height
-        }
+        global_context[node_key].width = width
+        global_context[node_key].height = height
     end
 
     global_parent = prev_parent
     global_id = prev_id
     return {
         node_key = node_key,
-        frame = global_context[node_key].local_frame
+        w = global_context[node_key].width,
+        h = global_context[node_key].height
     }
 end
 
 ---@param node_key string
----@param frame { x: integer, y: integer, w: integer, h: integer }
-local function recursive_calc_frame(node_key, frame)
+---@param current_width integer
+---@param current_height integer
+local function recursive_recalc_frames(node_key, current_width, current_height)
+    global_context[node_key].width = global_context[node_key].width or current_width
+    global_context[node_key].height = global_context[node_key].height or current_height
+
     for _, child_key in pairs(global_context[node_key].children) do
-        local child_frame = global_context[child_key].local_frame
-        global_context[child_key].global_frame = {
-            x = frame.x + child_frame.x - 1,
-            y = frame.y + child_frame.y - 1,
-            w = child_frame.w,
-            h = child_frame.h
-        }
-        if global_context[child_key].pass_frame then
-            recursive_calc_frame(child_key, global_context[child_key].global_frame)
-        else
-            recursive_calc_frame(child_key, frame)
-        end
+        recursive_recalc_frames(child_key, global_context[node_key].width, global_context[node_key].height)
+    end
+end
+
+---@param node_key string
+---@param x integer
+---@param y integer
+---@param w integer
+---@param h integer
+local function recursive_render(node_key, x, y, w, h)
+    global_context[node_key].x = x
+    global_context[node_key].y = y
+    
+    ---@type Element
+    local element = global_context[node_key].element
+
+    if element.type == "composable" then
+        recursive_render(global_context[node_key].children[1], x, y, w, h)
+    else
+        element.draw(Renderer(x, y, w, h), util.map(global_context[node_key].children, function(child_key)
+            return {
+                w = global_context[child_key].width,
+                h = global_context[child_key].height,
+                draw_callback = function(child_x, child_y, child_w, child_h)
+                    local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
+                    
+                    local width = global_context[child_key].width
+                    local height = global_context[child_key].height
+
+                    if child_w ~= nil then
+                        width = math.min(width, child_w)
+                    end
+
+                    if child_h ~= nil then
+                        height = math.min(height, child_h)
+                    end
+
+                    recursive_render(child_key, x + child_x - 1, y + child_y - 1, width, height)
+
+                    gpu.setBackground(old_background)
+                    gpu.setForeground(old_foreground)
+                end
+            }
+        end))
     end
 end
 
@@ -176,51 +193,44 @@ local global_component
 
 local function internal_render()
     local status, err = pcall(function()
-        local w, h = gpu.getViewport()
-        
-        gpu.fill(1, 1, w, h, " ")
-
+        local node_key = util.func_tostring(global_component)
         global_id = 0
-        global_parent = string.sub(tostring(global_component), 11)
+        global_parent = node_key
         global_events = {}
 
         for _, context in pairs(global_context) do
             context.rendered = false
         end
 
-        if global_context[string.sub(tostring(global_component), 11)] ~= nil then
-            global_context[string.sub(tostring(global_component), 11)].rendered = true
-        else
-            global_context[string.sub(tostring(global_component), 11)] = {
-                rendered = true,
-                states = {},
-                pass_frame = true,
-                local_frame = {
-                    x = 1,
-                    y = 1,
-                    w = w,
-                    h = h
-                },
-                global_frame = {
-                    x = 1,
-                    y = 1,
-                    w = w,
-                    h = h
-                },
-                children = {}
-            }
+        local child_info = recursive_build(global_component())
+
+        local w, h = gpu.getViewport()
+
+        local states = {}
+        if global_context[node_key] ~= nil then
+            states = global_context[node_key].states
         end
 
-        local child_info = recursive_render(global_component(), w, h, function(width, height)
-            return 1, 1
-        end)
-
-        global_context[child_info.node_key].global_frame = child_info.frame
-        recursive_calc_frame(child_info.node_key, child_info.frame)
+        global_context[node_key] = {
+            rendered = true,
+            states = states,
+            width = w,
+            height = h,
+            children = { child_info.node_key },
+            element = {
+                type = "composable"
+            }
+        }
 
         global_context = util.filter(global_context, function(context)
             return context.rendered
         end)
+
+        recursive_recalc_frames(node_key, w, h)
+
+        gpu.fill(1, 1, w, h, " ")
+
+        recursive_render(node_key, 1, 1, w, h)
     end)
 
     if not status then
@@ -244,8 +254,8 @@ function gui.start(start_node)
             for node_key, events_list in pairs(global_events) do
                 for event, callback in pairs(events_list) do
                     if event == "on_click" then
-                        local frame = global_context[node_key].global_frame
-                        if x >= frame.x and x < frame.x  + frame.w and y >= frame.y and y < frame.y + frame.h then
+                        local node_x, node_y, node_w, node_h = global_context[node_key].x, global_context[node_key].y, global_context[node_key].width, global_context[node_key].height
+                        if x >= node_x and x < node_x + node_w and y >= node_y and y < node_y + node_h then
                             callback()
                             goto outer_break -- break out of the outer loop
                         end
@@ -270,10 +280,7 @@ function gui.use_state(initial_state)
     if current_context == nil then
         current_context = {
             rendered = true,
-            states = {},
-            pass_frame = true,
-            local_frame = {},
-            children = {}
+            states = {}
         }
         global_context[parent] = current_context
     end
