@@ -39,6 +39,12 @@ return function()
         return current_id
     end
 
+    function Context.get_id_reset(self)
+        local current_id = self.id
+        self.id = 0
+        return current_id
+    end
+
     function Context.set_parent(self, node_key)
         local current_pattern = self.parent
         self.parent = node_key
@@ -78,7 +84,6 @@ return function()
         self.elements = util.filter(self.elements, function(element)
             return element.rendered
         end)
-
     end
 
     return Context
