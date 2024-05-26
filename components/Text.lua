@@ -3,14 +3,13 @@ local gui = require("gregui.gui")
 
 ---@class TextProps
 ---@field text string
----@field vertical boolean
+---@field vertical boolean?
 
 ---@param props TextProps
 ---@return Element
 return function(props)
     setmetatable(props, {
         __index = {
-            text = "",
             vertical = false
         }
     })

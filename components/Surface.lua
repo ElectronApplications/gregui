@@ -2,10 +2,10 @@ local gui = require("gregui.gui")
 
 ---@class SurfaceProps
 ---@field content Element
----@field background integer
----@field foreground integer
----@field elevation integer
----@field fill_max_size boolean
+---@field background integer?
+---@field foreground integer?
+---@field elevation integer?
+---@field fill_max_size boolean?
 
 ---@param props SurfaceProps
 ---@return Element

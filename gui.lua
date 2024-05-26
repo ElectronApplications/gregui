@@ -20,8 +20,8 @@ local global_events = {}
 
 ---@class ComposableElement
 ---@field type "composable"
----@field element fun(props: table): Element
----@field props table
+---@field element fun(props: any): Element
+---@field props any
 ---@field events table<string, function>?
 ---@field key (string | number)?
 
@@ -40,8 +40,9 @@ local global_events = {}
 ---@alias Element ComposableElement | DrawableElement
 
 
----@param element fun(props: table): Element
----@param props table
+---@generic T
+---@param element fun(props: T): Element
+---@param props T
 ---@param events table<string, function>?
 ---@param key (string | number)?
 ---@return ComposableElement

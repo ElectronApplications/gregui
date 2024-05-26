@@ -4,8 +4,8 @@ local util = require("gregui.util")
 
 ---@class ColumnProps
 ---@field children Element[]
----@field fill_max_width boolean
----@field horizontal_alignment "left" | "center" | "right"
+---@field fill_max_width boolean?
+---@field horizontal_alignment ("left" | "center" | "right")?
 
 ---@param props ColumnProps
 ---@return Element
