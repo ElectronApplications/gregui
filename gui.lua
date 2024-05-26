@@ -17,9 +17,14 @@ gui.create_drawable_element = element.create_drawable_element
 ---@type Context
 local context
 
----@param node Element
----@return { node_key: string, w: integer, h: integer }
+---@param node Element?
+---@return { node_key: string, w: integer, h: integer }?
 local function recursive_build(node)
+    if node == nil then
+        context.id = context.id + 1
+        return nil
+    end
+
     local node_key = context.parent .. "_" .. context.id
     
     if node.key ~= nil then
@@ -46,14 +51,18 @@ local function recursive_build(node)
 
     if node.type == "composable" then
         local child_info = recursive_build(node.element(node.props))
-        current_context.w = child_info.w
-        current_context.h = child_info.h
-        current_context.children = { child_info.node_key }
+        if child_info ~= nil then
+            current_context.w = child_info.w
+            current_context.h = child_info.h
+            current_context.children = { child_info.node_key }
+        end
     else
         local width, height = node.prepare(function(element)
             local child_info = recursive_build(element)
-            table.insert(current_context.children, child_info.node_key)
-            return child_info.w, child_info.h
+            if child_info ~= nil then
+                table.insert(current_context.children, child_info.node_key)
+                return child_info.w, child_info.h                
+            end
         end)
 
         current_context.w = width
@@ -96,7 +105,9 @@ local function recursive_draw(node_key, x, y, w, h)
     local element = current_context.element
 
     if element.type == "composable" then
-        recursive_draw(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
+        if current_context.children[1] ~= nil then
+            recursive_draw(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
+        end
     else
         element.draw(Renderer(x, y, w, h), util.map(current_context.children, function(child_key)
             local child_context = context:obtain_element(child_key)
@@ -134,7 +145,7 @@ local function recursive_draw(node_key, x, y, w, h)
     end
 end
 
----@type fun(): Element
+---@type fun(): Element?
 local global_component
 
 local function render()
@@ -146,19 +157,26 @@ local function render()
         
         local parent_element = gui.create_element(global_component, {})
         local parent_info = recursive_build(parent_element)
-        local parent_key = parent_info.node_key
-        local parent_context = context:obtain_element(parent_key)
-        
-        local w, h = gpu.getViewport()
-        parent_context.w = w
-        parent_context.h = h
-        
-        context:remove_not_rendered()
 
-        recursive_recalc_frames(parent_context.children[1], w, h)
-        
-        gpu.fill(1, 1, w, h, " ")
-        recursive_draw(parent_context.children[1], 1, 1, w, h)
+        if parent_info ~= nil then
+            local parent_key = parent_info.node_key
+            local parent_context = context:obtain_element(parent_key)
+            
+            local w, h = gpu.getViewport()
+            parent_context.w = w
+            parent_context.h = h
+            
+            context:remove_not_rendered()
+            
+            if parent_context.children[1] ~= nil then
+                recursive_recalc_frames(parent_context.children[1], w, h)
+            end
+            
+            gpu.fill(1, 1, w, h, " ")
+            if parent_context.children[1] ~= nil then
+                recursive_draw(parent_context.children[1], 1, 1, w, h)
+            end
+        end
     end)
 
     if not status then
@@ -166,7 +184,7 @@ local function render()
     end
 end
 
----@param start_node fun(): Element
+---@param start_node fun(): Element?
 function gui.start(start_node)
     context = Context()
 
