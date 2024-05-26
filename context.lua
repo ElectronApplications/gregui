@@ -3,7 +3,7 @@ local util = require("gregui.util")
 ---@class ContextElement
 ---@field rendered boolean
 ---@field states any[]
----@field cache { dependencies: any[]?, cleanup: function? }[]
+---@field cache { dependencies: any[]?, cleanup: function?, value: any? }[]
 ---@field element Element
 ---@field children string[]
 ---@field x integer

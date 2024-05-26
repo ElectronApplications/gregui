@@ -269,4 +269,58 @@ function gui.use_effect(effect, dependencies)
     end
 end
 
+---@param memo_func fun(): any
+---@param dependencies any[]?
+function gui.use_memo(memo_func, dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        current_cache.value = memo_func()
+        current_cache.dependencies = dependencies
+    end
+
+    return current_cache.value
+end
+
+---@param callback function
+---@param dependencies any[]?
+function gui.use_callback(callback, dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        current_cache.value = callback
+        current_cache.dependencies = dependencies
+    end
+
+    return current_cache.value
+end
+
 return gui
