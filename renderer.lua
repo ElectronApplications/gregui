@@ -8,6 +8,7 @@ local gpu = component.gpu
 ---@field private y integer
 ---@field private w integer
 ---@field private h integer
+---
 ---@field get_w fun(self: Renderer): integer
 ---@field get_h fun(self: Renderer): integer
 ---@field set_background fun(color: number): number

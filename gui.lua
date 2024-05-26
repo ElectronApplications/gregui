@@ -5,81 +5,27 @@ local component = require("component")
 local gpu = component.gpu
 
 local util = require("gregui.util")
+local element = require("gregui.element")
 local Renderer = require("gregui.renderer")
+local Context = require("gregui.context")
 
 local gui = {}
 
----@type integer
-local global_id = 0
+gui.create_element = element.create_element
+gui.create_drawable_element = element.create_drawable_element
 
----@type string
-local global_parent = ""
-
-local global_context = {}
-local global_events = {}
-
----@class ComposableElement
----@field type "composable"
----@field element fun(props: any): Element
----@field props any
----@field events table<string, function>?
----@field key (string | number)?
-
----@alias prepare_callback_function fun(element: Element): (integer | nil, integer | nil)
----@alias prepare_function fun(prepare_callback: prepare_callback_function): (integer | nil, integer | nil)
-
----@alias draw_function fun(renderer: Renderer, children: { w: integer, h: integer, draw_callback: fun(x: integer, y: integer, w: integer?, h: integer?) }[])
-
----@class DrawableElement
----@field type "drawable"
----@field prepare prepare_function
----@field draw draw_function
----@field events table<string, function>?
----@field key (string | number)?
-
----@alias Element ComposableElement | DrawableElement
-
-
----@generic T
----@param element fun(props: T): Element
----@param props T
----@param events table<string, function>?
----@param key (string | number)?
----@return ComposableElement
-function gui.create_element(element, props, events, key)
-    return {
-        type = "composable",
-        element = element,
-        props = props,
-        events = events,
-        key = key
-    }
-end
-
----@param prepare prepare_function
----@param draw draw_function
----@param events table<string, function>?
----@param key (string | number)?
----@return DrawableElement
-function gui.create_drawable_element(prepare, draw, events, key)
-    return {
-        type = "drawable",
-        prepare = prepare,
-        draw = draw,
-        events = events,
-        key = key
-    }
-end
+---@type Context
+local context
 
 ---@param node Element
 ---@return { node_key: string, w: integer, h: integer }
 local function recursive_build(node)
-    local node_key = global_parent .. "_" .. global_id
+    local node_key = context.parent .. "_" .. context.id
     
     if node.key ~= nil then
         node_key = node_key .. "_key_" .. node.key
     else
-        global_id = global_id + 1
+        context.id = context.id + 1
     end
 
     if node.type == "composable" then
@@ -87,50 +33,39 @@ local function recursive_build(node)
     end
     
     if node.events ~= nil then
-        global_events[node_key] = node.events
+        context.events[node_key] = node.events
     end
 
-    local prev_parent = global_parent
-    local prev_id = global_id
+    local prev_parent = context:set_parent(node_key)
+    local prev_id = context:get_id_reset()
 
-    global_parent = node_key
-    global_id = 0
-
-    if global_context[node_key] == nil then
-        global_context[node_key] = {
-            rendered = true,
-            states = {},
-            children = {},
-            element = node
-        }
-    else
-        global_context[node_key].rendered = true
-        global_context[node_key].children = {}
-        global_context[node_key].element = node
-    end
+    local current_context = context:obtain_element(node_key)
+    current_context.rendered = true
+    current_context.children = {}
+    current_context.element = node
 
     if node.type == "composable" then
         local child_info = recursive_build(node.element(node.props))
-        global_context[node_key].width = child_info.w
-        global_context[node_key].height = child_info.h
-        global_context[node_key].children = { child_info.node_key }
+        current_context.w = child_info.w
+        current_context.h = child_info.h
+        current_context.children = { child_info.node_key }
     else
         local width, height = node.prepare(function(element)
             local child_info = recursive_build(element)
-            table.insert(global_context[node_key].children, child_info.node_key)
+            table.insert(current_context.children, child_info.node_key)
             return child_info.w, child_info.h
         end)
 
-        global_context[node_key].width = width
-        global_context[node_key].height = height
+        current_context.w = width
+        current_context.h = height
     end
 
-    global_parent = prev_parent
-    global_id = prev_id
+    context.parent = prev_parent
+    context.id = prev_id
     return {
         node_key = node_key,
-        w = global_context[node_key].width,
-        h = global_context[node_key].height
+        w = current_context.w,
+        h = current_context.h
     }
 end
 
@@ -138,11 +73,12 @@ end
 ---@param current_width integer
 ---@param current_height integer
 local function recursive_recalc_frames(node_key, current_width, current_height)
-    global_context[node_key].width = global_context[node_key].width or current_width
-    global_context[node_key].height = global_context[node_key].height or current_height
+    local current_context = context:obtain_element(node_key)
+    current_context.w = current_context.w or current_width
+    current_context.h = current_context.h or current_height
 
-    for _, child_key in pairs(global_context[node_key].children) do
-        recursive_recalc_frames(child_key, global_context[node_key].width, global_context[node_key].height)
+    for _, child_key in pairs(current_context.children) do
+        recursive_recalc_frames(child_key, current_context.w, current_context.h)
     end
 end
 
@@ -152,24 +88,27 @@ end
 ---@param w integer
 ---@param h integer
 local function recursive_render(node_key, x, y, w, h)
-    global_context[node_key].x = x
-    global_context[node_key].y = y
+    local current_context = context:obtain_element(node_key)
+    current_context.x = x
+    current_context.y = y
     
     ---@type Element
-    local element = global_context[node_key].element
+    local element = current_context.element
 
     if element.type == "composable" then
-        recursive_render(global_context[node_key].children[1], global_context[node_key].x, global_context[node_key].y, global_context[node_key].width, global_context[node_key].height)
+        recursive_render(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
     else
-        element.draw(Renderer(x, y, w, h), util.map(global_context[node_key].children, function(child_key)
+        element.draw(Renderer(x, y, w, h), util.map(current_context.children, function(child_key)
             return {
-                w = global_context[child_key].width,
-                h = global_context[child_key].height,
+                w = current_context.w,
+                h = current_context.h,
                 draw_callback = function(child_x, child_y, child_w, child_h)
                     local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
                     
-                    local width = global_context[child_key].width
-                    local height = global_context[child_key].height
+                    ---@type integer
+                    local width = current_context.w
+                    ---@type integer
+                    local height = current_context.h
 
                     if child_w ~= nil then
                         width = math.min(width, child_w)
@@ -194,44 +133,26 @@ local global_component
 
 local function internal_render()
     local status, err = pcall(function()
-        local node_key = util.func_tostring(global_component)
-        global_id = 0
-        global_parent = node_key
-        global_events = {}
-
-        for _, context in pairs(global_context) do
-            context.rendered = false
-        end
-
-        local child_info = recursive_build(global_component())
-
+        context.id = 0
+        context.parent = ""
+        context.events = {}
+        context:set_not_rendered()
+        
+        local parent_element = gui.create_element(global_component, {})
+        local parent_info = recursive_build(parent_element)
+        local parent_key = parent_info.node_key
+        local parent_context = context:obtain_element(parent_key)
+        
         local w, h = gpu.getViewport()
+        parent_context.w = w
+        parent_context.h = h
+        
+        context:remove_not_rendered()
 
-        local states = {}
-        if global_context[node_key] ~= nil then
-            states = global_context[node_key].states
-        end
-
-        global_context[node_key] = {
-            rendered = true,
-            states = states,
-            width = w,
-            height = h,
-            children = { child_info.node_key },
-            element = {
-                type = "composable"
-            }
-        }
-
-        global_context = util.filter(global_context, function(context)
-            return context.rendered
-        end)
-
-        recursive_recalc_frames(node_key, w, h)
+        recursive_recalc_frames(parent_context.children[1], w, h)
 
         gpu.fill(1, 1, w, h, " ")
-
-        recursive_render(node_key, 1, 1, w, h)
+        recursive_render(parent_context.children[1], 1, 1, w, h)
     end)
 
     if not status then
@@ -242,7 +163,7 @@ end
 
 ---@param start_node fun(): Element
 function gui.start(start_node)
-    global_context = {}
+    context = Context()
 
     global_component = start_node
     internal_render()
@@ -252,13 +173,16 @@ function gui.start(start_node)
         if id == "interrupted" then
             break
         elseif id == "touch" then
-            for node_key, events_list in pairs(global_events) do
-                for event, callback in pairs(events_list) do
-                    if event == "on_click" then
-                        local node_x, node_y, node_w, node_h = global_context[node_key].x, global_context[node_key].y, global_context[node_key].width, global_context[node_key].height
-                        if x >= node_x and x < node_x + node_w and y >= node_y and y < node_y + node_h then
-                            callback()
-                            goto outer_break -- break out of the outer loop
+            for node_key, events_list in pairs(context.events) do
+                if context:element_present(node_key) then
+                    local element = context:obtain_element(node_key)
+                    for event, callback in pairs(events_list) do
+                        if event == "on_click" then
+                            -- TODO: component overlaps
+                            if x >= element.x and x < element.x + element.w and y >= element.y and y < element.y + element.h then
+                                callback()
+                                goto outer_break -- break out of the outer loop
+                            end
                         end
                     end
                 end
@@ -272,19 +196,9 @@ end
 ---@param initial_state T
 ---@return T, fun(T)
 function gui.use_state(initial_state)
-    local parent = global_parent
-    local id = global_id
-
-    global_id = global_id + 1
-
-    local current_context = global_context[parent]
-    if current_context == nil then
-        current_context = {
-            rendered = true,
-            states = {}
-        }
-        global_context[parent] = current_context
-    end
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
 
     local current_state = current_context.states[id]
     if current_state == nil then
