@@ -87,7 +87,7 @@ end
 ---@param y integer
 ---@param w integer
 ---@param h integer
-local function recursive_render(node_key, x, y, w, h)
+local function recursive_draw(node_key, x, y, w, h)
     local current_context = context:obtain_element(node_key)
     current_context.x = x
     current_context.y = y
@@ -96,7 +96,7 @@ local function recursive_render(node_key, x, y, w, h)
     local element = current_context.element
 
     if element.type == "composable" then
-        recursive_render(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
+        recursive_draw(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
     else
         element.draw(Renderer(x, y, w, h), util.map(current_context.children, function(child_key)
             local child_context = context:obtain_element(child_key)
@@ -107,9 +107,9 @@ local function recursive_render(node_key, x, y, w, h)
                     local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
                     
                     ---@type integer
-                    local width = current_context.w
+                    local width = child_context.w
                     ---@type integer
-                    local height = current_context.h
+                    local height = child_context.h
 
                     if child_w ~= nil then
                         width = math.min(width, child_w)
@@ -119,7 +119,12 @@ local function recursive_render(node_key, x, y, w, h)
                         height = math.min(height, child_h)
                     end
 
-                    recursive_render(child_key, x + child_x - 1, y + child_y - 1, width, height)
+                    local renderer_x = math.min(x + w - 1, math.max(x, x + child_x - 1))
+                    local renderer_y = math.min(y + h - 1, math.max(y, y + child_y - 1))
+                    width = math.min(w - renderer_x + 1, width)
+                    height = math.min(h - renderer_y + 1, height)
+
+                    recursive_draw(child_key, renderer_x, renderer_y, width, height)
 
                     gpu.setBackground(old_background)
                     gpu.setForeground(old_foreground)
@@ -132,7 +137,7 @@ end
 ---@type fun(): Element
 local global_component
 
-local function internal_render()
+local function render()
     local status, err = pcall(function()
         context.id = 0
         context.parent = ""
@@ -153,7 +158,7 @@ local function internal_render()
         recursive_recalc_frames(parent_context.children[1], w, h)
         
         gpu.fill(1, 1, w, h, " ")
-        recursive_render(parent_context.children[1], 1, 1, w, h)
+        recursive_draw(parent_context.children[1], 1, 1, w, h)
     end)
 
     if not status then
@@ -166,7 +171,7 @@ function gui.start(start_node)
     context = Context()
 
     global_component = start_node
-    internal_render()
+    render()
 
     while true do
         local id, _, x, y = event.pullMultiple("touch", "interrupted")
@@ -208,7 +213,7 @@ function gui.use_state(initial_state)
 
     local set_state = function (new_value)
         current_context.states[id] = new_value
-        internal_render()
+        render()
     end
 
     return current_state, set_state
