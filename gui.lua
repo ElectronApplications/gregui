@@ -91,7 +91,7 @@ local function recursive_render(node_key, x, y, w, h)
     local current_context = context:obtain_element(node_key)
     current_context.x = x
     current_context.y = y
-    
+
     ---@type Element
     local element = current_context.element
 
@@ -99,9 +99,10 @@ local function recursive_render(node_key, x, y, w, h)
         recursive_render(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
     else
         element.draw(Renderer(x, y, w, h), util.map(current_context.children, function(child_key)
+            local child_context = context:obtain_element(child_key)
             return {
-                w = current_context.w,
-                h = current_context.h,
+                w = child_context.w,
+                h = child_context.h,
                 draw_callback = function(child_x, child_y, child_w, child_h)
                     local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
                     
@@ -150,13 +151,12 @@ local function internal_render()
         context:remove_not_rendered()
 
         recursive_recalc_frames(parent_context.children[1], w, h)
-
+        
         gpu.fill(1, 1, w, h, " ")
         recursive_render(parent_context.children[1], 1, 1, w, h)
     end)
 
     if not status then
-        gpu.freeAllBuffers()
         print(err)
     end
 end
