@@ -5,8 +5,8 @@ local Box = require("gregui.components.Box")
 ---@class ButtonProps
 ---@field content Element
 ---@field on_click function
----@field background integer
----@field foreground integer
+---@field background integer?
+---@field foreground integer?
 
 ---@param props ButtonProps
 ---@return Element

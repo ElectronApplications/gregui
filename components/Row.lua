@@ -4,8 +4,8 @@ local util = require("gregui.util")
 
 ---@class RowProps
 ---@field children Element[]
----@field fill_max_height boolean
----@field vertical_alignment "top" | "center" | "bottom"
+---@field fill_max_height boolean?
+---@field vertical_alignment ("top" | "center" | "bottom")?
 
 ---@param props RowProps
 ---@return Element
