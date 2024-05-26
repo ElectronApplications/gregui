@@ -2,7 +2,7 @@ local element = {}
 
 ---@class ComposableElement
 ---@field type "composable"
----@field element fun(props: any): Element?
+---@field element fun(props: any): Element | "nil"
 ---@field props any
 ---@field events table<string, function>?
 ---@field key (string | number)?
@@ -22,7 +22,7 @@ local element = {}
 ---@alias Element ComposableElement | DrawableElement
 
 ---@generic T
----@param element fun(props: T): Element?
+---@param element fun(props: T): Element | "nil"
 ---@param props T
 ---@param events table<string, function>?
 ---@param key (string | number)?
