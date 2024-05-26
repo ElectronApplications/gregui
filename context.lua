@@ -3,6 +3,7 @@ local util = require("gregui.util")
 ---@class ContextElement
 ---@field rendered boolean
 ---@field states any[]
+---@field cache { dependencies: any[]?, cleanup: function? }[]
 ---@field element Element
 ---@field children string[]
 ---@field x integer
@@ -61,6 +62,7 @@ return function()
             context_element = {
                 rendered = true,
                 states = {},
+                cache = {},
                 element = {},
                 children = {},
                 x = 0,
@@ -82,6 +84,14 @@ return function()
 
     function Context.remove_not_rendered(self)
         self.elements = util.filter(self.elements, function(element)
+            if not element.rendered then
+                for _, cache in pairs(element.cache) do
+                    if cache.cleanup ~= nil then
+                        cache.cleanup()
+                    end
+                end
+            end
+
             return element.rendered
         end)
     end

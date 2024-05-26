@@ -17,14 +17,14 @@ gui.create_drawable_element = element.create_drawable_element
 ---@type Context
 local context
 
----@param node Element?
+---@param node Element | "nil"
 ---@return { node_key: string, w: integer, h: integer }?
 local function recursive_build(node)
-    if node == nil then
+    if node == "nil" then
         context.id = context.id + 1
         return nil
     end
-
+    
     local node_key = context.parent .. "_" .. context.id
     
     if node.key ~= nil then
@@ -47,10 +47,10 @@ local function recursive_build(node)
     local current_context = context:obtain_element(node_key)
     current_context.rendered = true
     current_context.children = {}
-    current_context.element = node
+    current_context.element = node --[[@as Element]]
 
     if node.type == "composable" then
-        local child_info = recursive_build(node.element(node.props))
+        local child_info = recursive_build(node.element(node.props) --[[@as Element]])
         if child_info ~= nil then
             current_context.w = child_info.w
             current_context.h = child_info.h
@@ -61,7 +61,9 @@ local function recursive_build(node)
             local child_info = recursive_build(element)
             if child_info ~= nil then
                 table.insert(current_context.children, child_info.node_key)
-                return child_info.w, child_info.h                
+                return child_info.w, child_info.h
+            else
+                return 0, 0
             end
         end)
 
@@ -145,7 +147,7 @@ local function recursive_draw(node_key, x, y, w, h)
     end
 end
 
----@type fun(): Element?
+---@type fun(): Element | "nil"
 local global_component
 
 local function render()
@@ -184,7 +186,7 @@ local function render()
     end
 end
 
----@param start_node fun(): Element?
+---@param start_node fun(): Element | "nil"
 function gui.start(start_node)
     context = Context()
 
@@ -194,6 +196,8 @@ function gui.start(start_node)
     while true do
         local id, _, x, y = event.pullMultiple("touch", "interrupted")
         if id == "interrupted" then
+            context:set_not_rendered()
+            context:remove_not_rendered()
             break
         elseif id == "touch" then
             for node_key, events_list in pairs(context.events) do
@@ -235,6 +239,34 @@ function gui.use_state(initial_state)
     end
 
     return current_state, set_state
+end
+
+---@param effect fun(): function?
+---@param dependencies any[]?
+function gui.use_effect(effect, dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        if current_cache.cleanup ~= nil then
+            current_cache.cleanup()
+        end
+        current_cache.cleanup = effect()
+        current_cache.dependencies = dependencies
+    end
 end
 
 return gui
