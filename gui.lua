@@ -192,13 +192,19 @@ local function render()
                 recursive_recalc_frames(child_key, w, h)
                 
                 local child_context = context:obtain_element(child_key)
-                gpu.fill(1, 1, w, h, " ")
+                local buffer_id = gpu.allocateBuffer(w, h)
+                gpu.setActiveBuffer(buffer_id)
+
                 recursive_draw(child_key, 1, 1, child_context.w, child_context.h, 1, 1, child_context.w, child_context.h)
+
+                gpu.bitblt()
+                gpu.freeBuffer(buffer_id)
             end
         end
     end)
 
     if not status then
+        gpu.freeAllBuffers()
         print(err)
     end
 end
