@@ -6,6 +6,7 @@ local util = require("gregui.util")
 ---@field children Element[]
 ---@field fill_max_width boolean?
 ---@field horizontal_alignment ("left" | "center" | "right")?
+---@field scrollable boolean?
 
 ---@param props ColumnProps
 ---@return Element
@@ -14,9 +15,12 @@ return function(props)
         __index = {
             children = {},
             fill_max_width = false,
-            horizontal_alignment = "left"
+            horizontal_alignment = "left",
+            scrollable = false
         }
     })
+
+    local scroll, set_scroll = gui.use_state(0)
 
     return gui.create_drawable_element(
         function (prepare_callback)
@@ -52,15 +56,23 @@ return function(props)
 
             for _, child in pairs(children) do
                 if props.horizontal_alignment == "left" then
-                    child.draw_callback(1, y)
+                    child.draw_callback(1, scroll + y)
                 elseif props.horizontal_alignment == "center" then
-                    child.draw_callback((total_width - child.w) // 2 + 1, y)
+                    child.draw_callback(math.max(1, (total_width - child.w) // 2 + 1), scroll + y)
                 else
-                    child.draw_callback(total_width - child.w + 1, y)
+                    child.draw_callback(total_width - child.w + 1, scroll + y)
                 end
 
                 y = y + child.h
             end
-        end
+        end,
+        {
+            on_scroll = function(player_name, direction, x, y, w, h, screen_w, screen_h)
+                if props.scrollable then
+                    local new_scroll = math.max(screen_h - h, math.min(0, scroll + direction))
+                    set_scroll(new_scroll)
+                end
+            end
+        }
     )
 end
