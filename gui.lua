@@ -5,80 +5,32 @@ local component = require("component")
 local gpu = component.gpu
 
 local util = require("gregui.util")
+local element = require("gregui.element")
 local Renderer = require("gregui.renderer")
+local Context = require("gregui.context")
 
 local gui = {}
 
----@type integer
-local global_id = 0
+gui.create_element = element.create_element
+gui.create_drawable_element = element.create_drawable_element
 
----@type string
-local global_parent = ""
+---@type Context
+local context
 
-local global_context = {}
-local global_events = {}
-
----@class ComposableElement
----@field type "composable"
----@field element fun(props: table): Element
----@field props table
----@field events table<string, function>?
----@field key (string | number)?
-
----@alias prepare_callback_function fun(element: Element): (integer | nil, integer | nil)
----@alias prepare_function fun(prepare_callback: prepare_callback_function): (integer | nil, integer | nil)
-
----@alias draw_function fun(renderer: Renderer, children: { w: integer, h: integer, draw_callback: fun(x: integer, y: integer, w: integer?, h: integer?) }[])
-
----@class DrawableElement
----@field type "drawable"
----@field prepare prepare_function
----@field draw draw_function
----@field events table<string, function>?
----@field key (string | number)?
-
----@alias Element ComposableElement | DrawableElement
-
-
----@param element fun(props: table): Element
----@param props table
----@param events table<string, function>?
----@param key (string | number)?
----@return ComposableElement
-function gui.create_element(element, props, events, key)
-    return {
-        type = "composable",
-        element = element,
-        props = props,
-        events = events,
-        key = key
-    }
-end
-
----@param prepare prepare_function
----@param draw draw_function
----@param events table<string, function>?
----@param key (string | number)?
----@return DrawableElement
-function gui.create_drawable_element(prepare, draw, events, key)
-    return {
-        type = "drawable",
-        prepare = prepare,
-        draw = draw,
-        events = events,
-        key = key
-    }
-end
-
----@param node Element
----@return { node_key: string, w: integer, h: integer }
+---@param node Element | "nil"
+---@return { node_key: string, w: integer, h: integer }?
 local function recursive_build(node)
-    local node_key = global_parent .. "_" .. global_id
+    if node == "nil" then
+        context.id = context.id + 1
+        return nil
+    end
+    
+    local node_key = context.parent .. "_" .. context.id
     
     if node.key ~= nil then
         node_key = node_key .. "_key_" .. node.key
     else
-        global_id = global_id + 1
+        context.id = context.id + 1
     end
 
     if node.type == "composable" then
@@ -86,50 +38,45 @@ local function recursive_build(node)
     end
     
     if node.events ~= nil then
-        global_events[node_key] = node.events
+        context.events[node_key] = node.events
     end
 
-    local prev_parent = global_parent
-    local prev_id = global_id
+    local prev_parent = context:set_parent(node_key)
+    local prev_id = context:get_id_reset()
 
-    global_parent = node_key
-    global_id = 0
-
-    if global_context[node_key] == nil then
-        global_context[node_key] = {
-            rendered = true,
-            states = {},
-            children = {},
-            element = node
-        }
-    else
-        global_context[node_key].rendered = true
-        global_context[node_key].children = {}
-        global_context[node_key].element = node
-    end
+    local current_context = context:obtain_element(node_key)
+    current_context.rendered = true
+    current_context.children = {}
+    current_context.element = node --[[@as Element]]
 
     if node.type == "composable" then
-        local child_info = recursive_build(node.element(node.props))
-        global_context[node_key].width = child_info.w
-        global_context[node_key].height = child_info.h
-        global_context[node_key].children = { child_info.node_key }
+        local child_info = recursive_build(node.element(node.props) --[[@as Element]])
+        if child_info ~= nil then
+            current_context.w = child_info.w
+            current_context.h = child_info.h
+            current_context.children = { child_info.node_key }
+        end
     else
         local width, height = node.prepare(function(element)
             local child_info = recursive_build(element)
-            table.insert(global_context[node_key].children, child_info.node_key)
-            return child_info.w, child_info.h
+            if child_info ~= nil then
+                table.insert(current_context.children, child_info.node_key)
+                return child_info.w, child_info.h
+            else
+                return 0, 0
+            end
         end)
 
-        global_context[node_key].width = width
-        global_context[node_key].height = height
+        current_context.w = width
+        current_context.h = height
     end
 
-    global_parent = prev_parent
-    global_id = prev_id
+    context.parent = prev_parent
+    context.id = prev_id
     return {
         node_key = node_key,
-        w = global_context[node_key].width,
-        h = global_context[node_key].height
+        w = current_context.w,
+        h = current_context.h
     }
 end
 
@@ -137,38 +84,47 @@ end
 ---@param current_width integer
 ---@param current_height integer
 local function recursive_recalc_frames(node_key, current_width, current_height)
-    global_context[node_key].width = global_context[node_key].width or current_width
-    global_context[node_key].height = global_context[node_key].height or current_height
+    local current_context = context:obtain_element(node_key)
+    current_context.w = current_context.w or current_width
+    current_context.h = current_context.h or current_height
 
-    for _, child_key in pairs(global_context[node_key].children) do
-        recursive_recalc_frames(child_key, global_context[node_key].width, global_context[node_key].height)
+    for _, child_key in pairs(current_context.children) do
+        recursive_recalc_frames(child_key, current_context.w, current_context.h)
     end
 end
 
 ---@param node_key string
+---@param virtual_x integer
+---@param virtual_y integer
+---@param virtual_w integer
+---@param virtual_h integer
 ---@param x integer
 ---@param y integer
 ---@param w integer
 ---@param h integer
-local function recursive_render(node_key, x, y, w, h)
-    global_context[node_key].x = x
-    global_context[node_key].y = y
-    
+local function recursive_draw(node_key, virtual_x, virtual_y, virtual_w, virtual_h, x, y, w, h)
+    local current_context = context:obtain_element(node_key)
+    current_context.x = x
+    current_context.y = y
+
     ---@type Element
-    local element = global_context[node_key].element
+    local element = current_context.element
 
     if element.type == "composable" then
-        recursive_render(global_context[node_key].children[1], global_context[node_key].x, global_context[node_key].y, global_context[node_key].width, global_context[node_key].height)
+        if current_context.children[1] ~= nil then
+            recursive_draw(current_context.children[1], virtual_x, virtual_y, current_context.w, current_context.h, x, y, w, h)
+        end
     else
-        element.draw(Renderer(x, y, w, h), util.map(global_context[node_key].children, function(child_key)
+        element.draw(Renderer(virtual_x, virtual_y, virtual_w, virtual_h, x, y, w, h), util.map(current_context.children, function(child_key)
+            local child_context = context:obtain_element(child_key)
             return {
-                w = global_context[child_key].width,
-                h = global_context[child_key].height,
+                w = child_context.w,
+                h = child_context.h,
                 draw_callback = function(child_x, child_y, child_w, child_h)
                     local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
                     
-                    local width = global_context[child_key].width
-                    local height = global_context[child_key].height
+                    local width = math.min(w, child_context.w)
+                    local height = math.min(h, child_context.h)
 
                     if child_w ~= nil then
                         width = math.min(width, child_w)
@@ -178,7 +134,12 @@ local function recursive_render(node_key, x, y, w, h)
                         height = math.min(height, child_h)
                     end
 
-                    recursive_render(child_key, x + child_x - 1, y + child_y - 1, width, height)
+                    local renderer_x = math.max(x, x + child_x - 1)
+                    local renderer_y = math.max(y, y + child_y - 1)
+                    width = math.max(0, math.min(w + x - renderer_x, width))
+                    height = math.max(0, math.min(h + y - renderer_y, height))
+
+                    recursive_draw(child_key, virtual_x + child_x - 1, virtual_y + child_y - 1, child_context.w, child_context.h, renderer_x, renderer_y, width, height)
 
                     gpu.setBackground(old_background)
                     gpu.setForeground(old_foreground)
@@ -188,76 +149,69 @@ local function recursive_render(node_key, x, y, w, h)
     end
 end
 
----@type fun(): Element
+---@type fun(): Element | "nil"
 local global_component
 
-local function internal_render()
+local function render()
     local status, err = pcall(function()
-        local node_key = util.func_tostring(global_component)
-        global_id = 0
-        global_parent = node_key
-        global_events = {}
+        context.id = 0
+        context.parent = ""
+        context.events = {}
+        context:set_not_rendered()
+        
+        local parent_element = gui.create_element(global_component, {})
+        local parent_info = recursive_build(parent_element)
 
-        for _, context in pairs(global_context) do
-            context.rendered = false
+        if parent_info ~= nil then
+            local parent_key = parent_info.node_key
+            local parent_context = context:obtain_element(parent_key)
+            
+            local w, h = gpu.getViewport()
+            parent_context.w = w
+            parent_context.h = h
+            
+            context:remove_not_rendered()
+            
+            local child_key = parent_context.children[1]
+            if child_key ~= nil then
+                recursive_recalc_frames(child_key, w, h)
+                
+                local child_context = context:obtain_element(child_key)
+                gpu.fill(1, 1, w, h, " ")
+                recursive_draw(child_key, 1, 1, child_context.w, child_context.h, 1, 1, child_context.w, child_context.h)
+            end
         end
-
-        local child_info = recursive_build(global_component())
-
-        local w, h = gpu.getViewport()
-
-        local states = {}
-        if global_context[node_key] ~= nil then
-            states = global_context[node_key].states
-        end
-
-        global_context[node_key] = {
-            rendered = true,
-            states = states,
-            width = w,
-            height = h,
-            children = { child_info.node_key },
-            element = {
-                type = "composable"
-            }
-        }
-
-        global_context = util.filter(global_context, function(context)
-            return context.rendered
-        end)
-
-        recursive_recalc_frames(node_key, w, h)
-
-        gpu.fill(1, 1, w, h, " ")
-
-        recursive_render(node_key, 1, 1, w, h)
     end)
 
     if not status then
-        gpu.freeAllBuffers()
         print(err)
     end
 end
 
----@param start_node fun(): Element
+---@param start_node fun(): Element | "nil"
 function gui.start(start_node)
-    global_context = {}
+    context = Context()
 
     global_component = start_node
-    internal_render()
+    render()
 
     while true do
         local id, _, x, y = event.pullMultiple("touch", "interrupted")
         if id == "interrupted" then
+            context:set_not_rendered()
+            context:remove_not_rendered()
             break
         elseif id == "touch" then
-            for node_key, events_list in pairs(global_events) do
-                for event, callback in pairs(events_list) do
-                    if event == "on_click" then
-                        local node_x, node_y, node_w, node_h = global_context[node_key].x, global_context[node_key].y, global_context[node_key].width, global_context[node_key].height
-                        if x >= node_x and x < node_x + node_w and y >= node_y and y < node_y + node_h then
-                            callback()
-                            goto outer_break -- break out of the outer loop
+            for node_key, events_list in pairs(context.events) do
+                if context:element_present(node_key) then
+                    local element = context:obtain_element(node_key)
+                    for event, callback in pairs(events_list) do
+                        if event == "on_click" then
+                            -- TODO: component overlaps
+                            if x >= element.x and x < element.x + element.w and y >= element.y and y < element.y + element.h then
+                                callback()
+                                goto outer_break -- break out of the outer loop
+                            end
                         end
                     end
                 end
@@ -271,19 +225,9 @@ end
 ---@param initial_state T
 ---@return T, fun(T)
 function gui.use_state(initial_state)
-    local parent = global_parent
-    local id = global_id
-
-    global_id = global_id + 1
-
-    local current_context = global_context[parent]
-    if current_context == nil then
-        current_context = {
-            rendered = true,
-            states = {}
-        }
-        global_context[parent] = current_context
-    end
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
 
     local current_state = current_context.states[id]
     if current_state == nil then
@@ -293,10 +237,133 @@ function gui.use_state(initial_state)
 
     local set_state = function (new_value)
         current_context.states[id] = new_value
-        internal_render()
+        render()
     end
 
     return current_state, set_state
+end
+
+---@param effect fun(): function?
+---@param dependencies any[]?
+function gui.use_effect(effect, dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        if current_cache.cleanup ~= nil then
+            current_cache.cleanup()
+        end
+        current_cache.cleanup = effect()
+        current_cache.dependencies = dependencies
+    end
+end
+
+---@generic T
+---@param memo_func fun(): T
+---@param dependencies any[]?
+---@return T
+function gui.use_memo(memo_func, dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        current_cache.value = memo_func()
+        current_cache.dependencies = dependencies
+    end
+
+    return current_cache.value
+end
+
+---@param callback function
+---@param dependencies any[]?
+---@return function
+function gui.use_callback(callback, dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        current_cache.value = callback
+        current_cache.dependencies = dependencies
+    end
+
+    return current_cache.value
+end
+
+---@param dependencies any[]?
+---@return number
+function gui.animate_state(dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        current_cache.value = 0.0
+        current_cache.dependencies = dependencies
+    end
+
+    if current_cache.value < 1.0 then
+        local event_id = event.timer(0.05, function()
+            current_cache.cleanup = nil
+            current_cache.value = math.min(1, current_cache.value + 0.05)
+            render()
+        end)
+        current_cache.cleanup = function()
+            event.cancel(event_id) 
+        end
+    end
+
+    return current_cache.value
 end
 
 return gui

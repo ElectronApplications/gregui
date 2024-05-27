@@ -5,8 +5,8 @@ local Text = require("gregui.components.Text")
 ---@class TextButtonProps
 ---@field text string
 ---@field on_click function
----@field background integer
----@field foreground integer
+---@field background integer?
+---@field foreground integer?
 
 ---@param props TextButtonProps
 ---@return Element

@@ -2,10 +2,10 @@ local gui = require("gregui.gui")
 
 ---@class BoxProps
 ---@field content Element
----@field padding_left integer
----@field padding_right integer
----@field padding_top integer
----@field padding_bottom integer
+---@field padding_left integer?
+---@field padding_right integer?
+---@field padding_top integer?
+---@field padding_bottom integer?
 
 ---@param props BoxProps
 ---@return Element

@@ -2,10 +2,10 @@ local gui = require("gregui.gui")
 
 ---@class SurfaceProps
 ---@field content Element
----@field background integer
----@field foreground integer
----@field elevation integer
----@field fill_max_size boolean
+---@field background integer?
+---@field foreground integer?
+---@field elevation integer?
+---@field fill_max_size boolean?
 
 ---@param props SurfaceProps
 ---@return Element
@@ -36,8 +36,8 @@ return function(props)
                 local darker_background = (r << 16) | (g << 8) | b
                 
                 renderer.set_background(darker_background)
-                renderer:fill(renderer:get_w() - props.elevation + 1, 2, props.elevation, renderer:get_h(), " ")
-                renderer:fill(2, renderer:get_h() - props.elevation + 1, renderer:get_w(), props.elevation, " ")
+                renderer:fill(renderer:get_w() - props.elevation + 1, 1 + props.elevation, props.elevation, renderer:get_h() - props.elevation, " ")
+                renderer:fill(1 + props.elevation, renderer:get_h() - props.elevation + 1, renderer:get_w() - props.elevation, props.elevation, " ")
             end
 
             renderer.set_background(props.background)
