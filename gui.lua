@@ -94,28 +94,41 @@ local function recursive_recalc_frames(node_key, current_width, current_height)
 end
 
 ---@param node_key string
----@param virtual_x integer
----@param virtual_y integer
----@param virtual_w integer
----@param virtual_h integer
 ---@param x integer
 ---@param y integer
 ---@param w integer
 ---@param h integer
-local function recursive_draw(node_key, virtual_x, virtual_y, virtual_w, virtual_h, x, y, w, h)
+---@param screen_x integer
+---@param screen_y integer
+---@param screen_w integer
+---@param screen_h integer
+local function recursive_draw(node_key, x, y, w, h, screen_x, screen_y, screen_w, screen_h)
     local current_context = context:obtain_element(node_key)
     current_context.x = x
     current_context.y = y
+    current_context.screen_x = screen_x
+    current_context.screen_y = screen_y
+    current_context.screen_w = screen_w
+    current_context.screen_h = screen_h
+
+    if context.events[node_key] ~= nil then
+        if context.events[node_key].on_click ~= nil then
+            table.insert(context.event_areas, { node_key = node_key, event = "on_click", x = screen_x, y = screen_y, w = screen_w, h = screen_h })
+        end
+        if context.events[node_key].on_scroll ~= nil then
+            table.insert(context.event_areas, { node_key = node_key, event = "on_scroll", x = screen_x, y = screen_y, w = screen_w, h = screen_h })
+        end
+    end
 
     ---@type Element
     local element = current_context.element
 
     if element.type == "composable" then
         if current_context.children[1] ~= nil then
-            recursive_draw(current_context.children[1], virtual_x, virtual_y, current_context.w, current_context.h, x, y, w, h)
+            recursive_draw(current_context.children[1], x, y, w, h, screen_x, screen_y, screen_w, screen_h)
         end
     else
-        element.draw(Renderer(virtual_x, virtual_y, virtual_w, virtual_h, x, y, w, h), util.map(current_context.children, function(child_key)
+        element.draw(Renderer(x, y, w, h, screen_x, screen_y, screen_w, screen_h), util.map(current_context.children, function(child_key)
             local child_context = context:obtain_element(child_key)
             return {
                 w = child_context.w,
@@ -123,23 +136,24 @@ local function recursive_draw(node_key, virtual_x, virtual_y, virtual_w, virtual
                 draw_callback = function(child_x, child_y, child_w, child_h)
                     local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
                     
-                    local width = math.min(w, child_context.w)
-                    local height = math.min(h, child_context.h)
+                    local renderer_x = math.min(screen_x + screen_w - 1, math.max(screen_x, x + child_x - 1))
+                    local renderer_y = math.min(screen_y + screen_h - 1, math.max(screen_y, y + child_y - 1))
+
+                    local renderer_w = math.min(screen_w + screen_x - renderer_x, screen_w)
+                    local renderer_h = math.min(screen_h + screen_y - renderer_y, screen_h)
+
+                    renderer_w = math.min(renderer_w, x + child_x - 1 + child_context.w - renderer_x)
+                    renderer_h = math.min(renderer_h, y + child_y - 1 + child_context.h - renderer_y)
 
                     if child_w ~= nil then
-                        width = math.min(width, child_w)
+                        renderer_w = math.min(renderer_w, x + child_x - 1 + child_w - renderer_x)
                     end
 
                     if child_h ~= nil then
-                        height = math.min(height, child_h)
+                        renderer_h = math.min(renderer_h, y + child_y - 1 + child_h - renderer_y)
                     end
 
-                    local renderer_x = math.max(x, x + child_x - 1)
-                    local renderer_y = math.max(y, y + child_y - 1)
-                    width = math.max(0, math.min(w + x - renderer_x, width))
-                    height = math.max(0, math.min(h + y - renderer_y, height))
-
-                    recursive_draw(child_key, virtual_x + child_x - 1, virtual_y + child_y - 1, child_context.w, child_context.h, renderer_x, renderer_y, width, height)
+                    recursive_draw(child_key, x + child_x - 1, y + child_y - 1, child_context.w, child_context.h, renderer_x, renderer_y, renderer_w, renderer_h)
 
                     gpu.setBackground(old_background)
                     gpu.setForeground(old_foreground)
@@ -157,6 +171,7 @@ local function render()
         context.id = 0
         context.parent = ""
         context.events = {}
+        context.event_areas = {}
         context:set_not_rendered()
         
         local parent_element = gui.create_element(global_component, {})
@@ -167,8 +182,8 @@ local function render()
             local parent_context = context:obtain_element(parent_key)
             
             local w, h = gpu.getViewport()
-            parent_context.w = w
-            parent_context.h = h
+            parent_context.x, parent_context.y, parent_context.w, parent_context.h = 1, 1, w, h
+            parent_context.screen_x, parent_context.screen_y, parent_context.screen_w, parent_context.screen_h = 1, 1, w, h
             
             context:remove_not_rendered()
             
@@ -196,27 +211,30 @@ function gui.start(start_node)
     render()
 
     while true do
-        local id, _, x, y = event.pullMultiple("touch", "interrupted")
+        -- TODO: replace with functions
+        local id, screen_address, x, y, direction_or_button, player_name = event.pullMultiple("touch", "scroll", "interrupted")
         if id == "interrupted" then
             context:set_not_rendered()
             context:remove_not_rendered()
             break
         elseif id == "touch" then
-            for node_key, events_list in pairs(context.events) do
-                if context:element_present(node_key) then
-                    local element = context:obtain_element(node_key)
-                    for event, callback in pairs(events_list) do
-                        if event == "on_click" then
-                            -- TODO: component overlaps
-                            if x >= element.x and x < element.x + element.w and y >= element.y and y < element.y + element.h then
-                                callback()
-                                goto outer_break -- break out of the outer loop
-                            end
-                        end
-                    end
+            for i = #context.event_areas, 1, -1 do
+                local area = context.event_areas[i]
+                if area.event == "on_click" and x >= area.x and x < area.x + area.w and y >= area.y and y < area.y + area.h then
+                    local node_context = context:obtain_element(area.node_key)
+                    context.events[area.node_key].on_click(player_name, direction_or_button, x - node_context.x + 1, y - node_context.y + 1, node_context.w, node_context.h, node_context.screen_w, node_context.screen_h)
+                    i = 0
                 end
             end
-            ::outer_break::
+        elseif id == "scroll" then
+            for i = #context.event_areas, 1, -1 do
+                local area = context.event_areas[i]
+                if area.event == "on_scroll" and x >= area.x and x < area.x + area.w and y >= area.y and y < area.y + area.h then
+                    local node_context = context:obtain_element(area.node_key)
+                    context.events[area.node_key].on_scroll(player_name, direction_or_button, x - node_context.x + 1, y - node_context.y + 1, node_context.w, node_context.h, node_context.screen_w, node_context.screen_h)
+                    i = 0
+                end
+            end
         end
     end
 end

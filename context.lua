@@ -1,5 +1,9 @@
 local util = require("gregui.util")
 
+---@class EventHandlers
+---@field on_click fun(player_name: string, button: integer, x: integer, y: integer, w: integer, h: integer, screen_w: integer, screen_h: integer)?
+---@field on_scroll fun(player_name: string, direction: integer, x: integer, y: integer, w: integer, h: integer, screen_w: integer, screen_h: integer)?
+
 ---@class ContextElement
 ---@field rendered boolean
 ---@field states any[]
@@ -10,11 +14,16 @@ local util = require("gregui.util")
 ---@field y integer
 ---@field w integer?
 ---@field h integer?
+---@field screen_x integer
+---@field screen_y integer
+---@field screen_w integer
+---@field screen_h integer
 
 ---@class Context
 ---@field id integer
 ---@field parent string
----@field events table<string, table<string, function>>
+---@field events table<string, EventHandlers>
+---@field event_areas { node_key: string, event: string, x: integer, y: integer, w: integer, h: integer }[]
 ---@field private elements table<string, ContextElement>
 ---
 ---@field get_id_inc fun(self: Context): integer
@@ -31,7 +40,8 @@ return function()
         id = 0,
         parent = "",
         elements = {},
-        events = {}
+        events = {},
+        event_areas = {}
     }
     
     function Context.get_id_inc(self)
@@ -68,7 +78,11 @@ return function()
                 x = 0,
                 y = 0,
                 w = 0,
-                h = 0
+                h = 0,
+                screen_x = 0,
+                screen_y = 0,
+                screen_w = 0,
+                screen_h = 0
             }
             self.elements[node_key] = context_element
         end

@@ -6,7 +6,7 @@ local Box = require("gregui.components.Box")
 
 ---@class ButtonProps
 ---@field content Element
----@field on_click function
+---@field on_click fun(player_name: string)
 ---@field background integer?
 ---@field foreground integer?
 
@@ -59,9 +59,9 @@ return function(props)
             padding_top = (pressed[1] and {1} or {0})[1]
         },
         {
-            on_click = function()
+            on_click = function(player_name)
                 set_pressed({true})
-                props.on_click()
+                props.on_click(player_name)
             end
         }
     )

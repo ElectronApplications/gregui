@@ -4,7 +4,7 @@ local element = {}
 ---@field type "composable"
 ---@field element fun(props: any): Element | "nil"
 ---@field props any
----@field events table<string, function>?
+---@field events EventHandlers?
 ---@field key (string | number)?
 
 ---@alias prepare_callback_function fun(element: Element): (integer | nil, integer | nil)
@@ -16,7 +16,7 @@ local element = {}
 ---@field type "drawable"
 ---@field prepare prepare_function
 ---@field draw draw_function
----@field events table<string, function>?
+---@field events EventHandlers?
 ---@field key (string | number)?
 
 ---@alias Element ComposableElement | DrawableElement
@@ -24,7 +24,7 @@ local element = {}
 ---@generic T
 ---@param element fun(props: T): Element | "nil"
 ---@param props T
----@param events table<string, function>?
+---@param events EventHandlers?
 ---@param key (string | number)?
 ---@return ComposableElement
 function element.create_element(element, props, events, key)
@@ -39,7 +39,7 @@ end
 
 ---@param prepare prepare_function
 ---@param draw draw_function
----@param events table<string, function>?
+---@param events EventHandlers?
 ---@param key (string | number)?
 ---@return DrawableElement
 function element.create_drawable_element(prepare, draw, events, key)
