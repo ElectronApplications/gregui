@@ -94,11 +94,15 @@ local function recursive_recalc_frames(node_key, current_width, current_height)
 end
 
 ---@param node_key string
+---@param virtual_x integer
+---@param virtual_y integer
+---@param virtual_w integer
+---@param virtual_h integer
 ---@param x integer
 ---@param y integer
 ---@param w integer
 ---@param h integer
-local function recursive_draw(node_key, x, y, w, h)
+local function recursive_draw(node_key, virtual_x, virtual_y, virtual_w, virtual_h, x, y, w, h)
     local current_context = context:obtain_element(node_key)
     current_context.x = x
     current_context.y = y
@@ -108,10 +112,10 @@ local function recursive_draw(node_key, x, y, w, h)
 
     if element.type == "composable" then
         if current_context.children[1] ~= nil then
-            recursive_draw(current_context.children[1], current_context.x, current_context.y, current_context.w, current_context.h)
+            recursive_draw(current_context.children[1], virtual_x, virtual_y, current_context.w, current_context.h, x, y, w, h)
         end
     else
-        element.draw(Renderer(x, y, w, h), util.map(current_context.children, function(child_key)
+        element.draw(Renderer(virtual_x, virtual_y, virtual_w, virtual_h, x, y, w, h), util.map(current_context.children, function(child_key)
             local child_context = context:obtain_element(child_key)
             return {
                 w = child_context.w,
@@ -119,10 +123,8 @@ local function recursive_draw(node_key, x, y, w, h)
                 draw_callback = function(child_x, child_y, child_w, child_h)
                     local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
                     
-                    ---@type integer
-                    local width = child_context.w
-                    ---@type integer
-                    local height = child_context.h
+                    local width = math.min(w, child_context.w)
+                    local height = math.min(h, child_context.h)
 
                     if child_w ~= nil then
                         width = math.min(width, child_w)
@@ -132,12 +134,12 @@ local function recursive_draw(node_key, x, y, w, h)
                         height = math.min(height, child_h)
                     end
 
-                    local renderer_x = math.min(x + w - 1, math.max(x, x + child_x - 1))
-                    local renderer_y = math.min(y + h - 1, math.max(y, y + child_y - 1))
-                    width = math.min(w - renderer_x + 1, width)
-                    height = math.min(h - renderer_y + 1, height)
+                    local renderer_x = math.max(x, x + child_x - 1)
+                    local renderer_y = math.max(y, y + child_y - 1)
+                    width = math.max(0, math.min(w + x - renderer_x, width))
+                    height = math.max(0, math.min(h + y - renderer_y, height))
 
-                    recursive_draw(child_key, renderer_x, renderer_y, width, height)
+                    recursive_draw(child_key, virtual_x + child_x - 1, virtual_y + child_y - 1, child_context.w, child_context.h, renderer_x, renderer_y, width, height)
 
                     gpu.setBackground(old_background)
                     gpu.setForeground(old_foreground)
@@ -170,13 +172,13 @@ local function render()
             
             context:remove_not_rendered()
             
-            if parent_context.children[1] ~= nil then
-                recursive_recalc_frames(parent_context.children[1], w, h)
-            end
-            
-            gpu.fill(1, 1, w, h, " ")
-            if parent_context.children[1] ~= nil then
-                recursive_draw(parent_context.children[1], 1, 1, w, h)
+            local child_key = parent_context.children[1]
+            if child_key ~= nil then
+                recursive_recalc_frames(child_key, w, h)
+                
+                local child_context = context:obtain_element(child_key)
+                gpu.fill(1, 1, w, h, " ")
+                recursive_draw(child_key, 1, 1, child_context.w, child_context.h, 1, 1, child_context.w, child_context.h)
             end
         end
     end)
@@ -269,8 +271,10 @@ function gui.use_effect(effect, dependencies)
     end
 end
 
----@param memo_func fun(): any
+---@generic T
+---@param memo_func fun(): T
 ---@param dependencies any[]?
+---@return T
 function gui.use_memo(memo_func, dependencies)
     local parent = context.parent
     local id = context:get_id_inc()
@@ -298,6 +302,7 @@ end
 
 ---@param callback function
 ---@param dependencies any[]?
+---@return function
 function gui.use_callback(callback, dependencies)
     local parent = context.parent
     local id = context:get_id_inc()
@@ -318,6 +323,44 @@ function gui.use_callback(callback, dependencies)
     if dependencies_changed then
         current_cache.value = callback
         current_cache.dependencies = dependencies
+    end
+
+    return current_cache.value
+end
+
+---@param dependencies any[]?
+---@return number
+function gui.animate_state(dependencies)
+    local parent = context.parent
+    local id = context:get_id_inc()
+    local current_context = context:obtain_element(parent)
+
+    local current_cache = current_context.cache[id]
+    if current_cache == nil then
+        current_cache = {
+            dependencies = nil
+        }
+        current_context.cache[id] = current_cache
+    end
+
+    local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
+        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+    end)
+
+    if dependencies_changed then
+        current_cache.value = 0.0
+        current_cache.dependencies = dependencies
+    end
+
+    if current_cache.value < 1.0 then
+        local event_id = event.timer(0.05, function()
+            current_cache.cleanup = nil
+            current_cache.value = math.min(1, current_cache.value + 0.05)
+            render()
+        end)
+        current_cache.cleanup = function()
+            event.cancel(event_id) 
+        end
     end
 
     return current_cache.value
