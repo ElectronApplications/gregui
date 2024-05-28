@@ -10,6 +10,10 @@ local util = require("gregui.util")
 ---@field cache { dependencies: any[]?, cleanup: function?, value: any? }[]
 ---@field element Element
 ---@field children string[]
+---@field parent_key string
+---@field id integer
+---@field background integer
+---@field foreground integer
 ---@field x integer
 ---@field y integer
 ---@field w integer?
@@ -29,9 +33,10 @@ local util = require("gregui.util")
 ---@field get_id_inc fun(self: Context): integer
 ---@field get_id_reset fun(self: Context): integer
 ---@field set_parent fun(self: Context, node_key: string): string
+---@field set_element fun(self: Context, node_key: string)
 ---@field element_present fun(self: Context, node_key: string): boolean
 ---@field obtain_element fun(self: Context, node_key: string): ContextElement
----@field set_not_rendered fun(self)
+---@field set_not_rendered fun(self, node_key: string)
 ---@field remove_not_rendered fun(self)
 
 ---@return Context
@@ -62,6 +67,12 @@ return function()
         return current_pattern
     end
 
+    function Context.set_element(self, node_key)
+        local element = self:obtain_element(node_key)
+        self.parent = element.parent_key
+        self.id = element.id
+    end
+
     function Context.element_present(self, node_key)
         return self.elements[node_key] ~= nil
     end
@@ -74,7 +85,11 @@ return function()
                 states = {},
                 cache = {},
                 element = {},
+                parent_key = "",
                 children = {},
+                id = 0,
+                background = 0,
+                foreground = 0,
                 x = 0,
                 y = 0,
                 w = 0,
@@ -90,9 +105,12 @@ return function()
         return context_element
     end
 
-    function Context.set_not_rendered(self)
-        for _, element in pairs(self.elements) do
-            element.rendered = false
+    function Context.set_not_rendered(self, node_key)
+        local element = self:obtain_element(node_key)
+        element.rendered = false
+        self.events[node_key] = nil
+        for _, child in pairs(element.children) do
+            self:set_not_rendered(child)
         end
     end
 
