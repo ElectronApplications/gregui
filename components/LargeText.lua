@@ -100,11 +100,11 @@ local char_map = {
     ["~"] = {0x0, 0x0, 0x5, 0xa, 0x0},
 }
 
----@class BigTextProps
+---@class LargeTextProps
 ---@field text string
 ---@field color integer?
 
----@param props BigTextProps
+---@param props LargeTextProps
 ---@return Element
 return function(props)
     setmetatable(props, {
