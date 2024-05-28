@@ -27,6 +27,20 @@ function util.filter(table, f)
 end
 
 ---@generic T, E
+---@param array T[]
+---@param f fun(value: E, key: T): boolean
+---@return T[]
+function util.array_filter(array, f)
+    local result = {}
+    for k, v in pairs(array) do
+        if f(v, k) then
+            table.insert(result, v)
+        end
+    end
+    return result
+end
+
+---@generic T, E
 ---@param table table<T, E>
 ---@param f fun(value: E, key: T): boolean
 ---@return boolean
