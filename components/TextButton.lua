@@ -18,18 +18,18 @@ return function(props)
         }
     })
 
-    return gui.create_element(
-        Button,
-        {
-            content = gui.create_element(
-                Text,
-                {
+    return gui.create_element{
+        element = Button,
+        props = {
+            content = gui.create_element{
+                element = Text,
+                props = {
                     text = props.text
                 }
-            ),
+            },
             background = props.background,
             foreground = props.foreground,
             on_click = props.on_click
         }
-    )
+    }
 end

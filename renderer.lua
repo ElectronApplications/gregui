@@ -17,11 +17,11 @@ local gpu = component.gpu
 ---@field get_h fun(self: Renderer): integer
 ---@field get_screen_w fun(self: Renderer): integer
 ---@field get_screen_h fun(self: Renderer): integer
----@field set_background fun(color: number): number
----@field set_foreground fun(color: number): number
----@field set fun(self: Renderer, x: number, y: number, value: string, vertical: boolean?)
----@field get fun(self: Renderer, x: number, y: number): string?, number?, number?
----@field fill fun(self: Renderer, x: number, y: number, width: number, height: number, char: string)
+---@field set_background fun(color: integer): integer
+---@field set_foreground fun(color: integer): integer
+---@field set fun(self: Renderer, x: integer, y: integer, value: string, vertical: boolean?)
+---@field get fun(self: Renderer, x: integer, y: integer): string?, integer?, integer?
+---@field fill fun(self: Renderer, x: integer, y: integer, width: integer, height: integer, char: string)
 
 ---@param x integer
 ---@param y integer

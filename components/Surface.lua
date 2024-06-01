@@ -19,8 +19,8 @@ return function(props)
         }
     })
 
-    return gui.create_drawable_element(
-        function (prepare_callback)
+    return gui.create_drawable_element{
+        prepare = function (prepare_callback)
             local w, h = prepare_callback(props.content)
 
             if props.fill_max_size then
@@ -29,7 +29,7 @@ return function(props)
                 return w + props.elevation, h + props.elevation
             end
         end,
-        function (renderer, children)
+        draw = function (renderer, children)
             if props.elevation > 0 then
                 local r, g, b = props.background >> 16 & 0xFF, props.background >> 8 & 0xFF, props.background & 0xFF
                 r, g, b = math.ceil(r * 0.5), math.ceil(g * 0.5), math.ceil(b * 0.5)
@@ -47,5 +47,5 @@ return function(props)
 
             children[1].draw_callback(1, 1)
         end
-    )
+    }
 end

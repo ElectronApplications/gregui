@@ -1,4 +1,3 @@
-local math = require("math")
 local gui = require("gregui.gui")
 
 -- Taken from https://github.com/tompreston/4x5-Font/blob/master/4x5-font.js
@@ -116,11 +115,11 @@ return function(props)
     local text_len = string.len(props.text)
     local width = text_len * 4 + (text_len > 0 and {text_len - 1} or {0})[1]
 
-    return gui.create_drawable_element(
-        function (prepare_callback)
+    return gui.create_drawable_element{
+        prepare = function (prepare_callback)
             return width, 5
         end,
-        function (renderer, children)
+        draw = function (renderer, children)
             renderer.set_background(props.color)
 
             local char_x = 1
@@ -142,5 +141,5 @@ return function(props)
                 char_x = char_x + 5
             end
         end
-    )
+    }
 end

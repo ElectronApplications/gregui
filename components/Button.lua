@@ -34,35 +34,35 @@ return function(props)
         end
     end, {pressed})
 
-    return gui.create_element(
-        Box,
-        {
-            content = gui.create_element(
-                Surface,
-                {
-                    content = gui.create_element(
-                        Box,
-                        {
+    return gui.create_element{
+        element = Box,
+        props = {
+            content = gui.create_element{
+                element = Surface,
+                props = {
+                    content = gui.create_element{
+                        element = Box,
+                        props = {
                             content = props.content,
                             padding_left = 1,
                             padding_right = 1,
                             padding_top = 1,
                             padding_bottom = 1
                         }
-                    ),
+                    },
                     background = props.background,
                     foreground = props.foreground,
                     elevation = (pressed[1] and {0} or {1})[1]
                 }
-            ),
+            },
             padding_left = (pressed[1] and {1} or {0})[1],
             padding_top = (pressed[1] and {1} or {0})[1]
         },
-        {
+        events = {
             on_click = function(player_name)
                 set_pressed({true})
                 props.on_click(player_name)
             end
         }
-    )
+    }
 end

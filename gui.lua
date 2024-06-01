@@ -13,6 +13,7 @@ local gui = {}
 
 gui.create_element = element.create_element
 gui.create_drawable_element = element.create_drawable_element
+gui.elements_array = element.elements_array
 
 ---@type Context
 local context
@@ -42,13 +43,37 @@ local function recursive_build(node)
         context.events[node_key] = node.events
     end
 
+    if node.type == "composable" and not node.disable_memo and context:element_present(node_key) then
+        local node_context = context:obtain_element(node_key)
+        local prev_props = node_context.element.props
+
+        local props_changed = not element.compare_props(prev_props, node.props, node.props_equal)
+        
+        if not props_changed then
+            local current_context = context:obtain_element(node_key)
+            current_context.rendered = true
+            current_context.element = node --[[@as Element]]
+            return {
+                node_key = node_key,
+                w = current_context.w,
+                h = current_context.h
+            }
+        end
+    end
+
+    context:set_not_rendered(node_key)
+    context.event_areas = util.array_filter(context.event_areas, function(value)
+        return context.events[value.node_key] ~= nil
+    end)
+
     local prev_parent = context:set_parent(node_key)
 
     local current_context = context:obtain_element(node_key)
     current_context.rendered = true
+    current_context.dirty = true
+    current_context.element = node --[[@as Element]]
     current_context.parent_key = prev_parent
     current_context.children = {}
-    current_context.element = node --[[@as Element]]
     current_context.id = prev_id
     
     prev_id = context:get_id_reset()
@@ -97,6 +122,33 @@ local function recursive_recalc_frames(node_key, current_width, current_height)
     end
 end
 
+local function recursive_offset(node_key, offset_x, offset_y)
+    local node_context = context:obtain_element(node_key)
+
+    for _, child_key in pairs(node_context.children) do
+        local child_context = context:obtain_element(child_key)
+        child_context.x = child_context.x + offset_x
+        child_context.y = child_context.y + offset_y
+        
+        if offset_x > 0 then
+            child_context.screen_x = math.min(node_context.screen_x, child_context.screen_x + offset_x)
+        else
+            child_context.screen_x = math.max(node_context.screen_x, child_context.screen_x + offset_x)
+        end
+
+        if offset_y > 0 then
+            child_context.screen_y = math.min(node_context.screen_y, child_context.screen_y + offset_y)
+        else
+            child_context.screen_y = math.max(node_context.screen_y, child_context.screen_y + offset_y)
+        end
+
+        child_context.screen_w = math.min(node_context.screen_w, child_context.screen_w)
+        child_context.screen_h = math.min(node_context.screen_h, child_context.screen_h)
+
+        recursive_offset(child_key, offset_x, offset_y)
+    end
+end
+
 ---@param node_key string
 ---@param x integer
 ---@param y integer
@@ -108,6 +160,10 @@ end
 ---@param screen_h integer
 local function recursive_draw(node_key, x, y, w, h, screen_x, screen_y, screen_w, screen_h)
     local current_context = context:obtain_element(node_key)
+    local prev_x, prev_y = current_context.x, current_context.y
+    local prev_screen_x, prev_screen_y, prev_screen_w, prev_screen_h = current_context.screen_x, current_context.screen_y, current_context.screen_w, current_context.screen_h
+    local prev_background, prev_foreground = current_context.background, current_context.foreground
+
     current_context.x, current_context.y = x, y
     current_context.screen_x, current_context.screen_y, current_context.screen_w, current_context.screen_h = screen_x, screen_y, screen_w, screen_h
     current_context.background, current_context.foreground = gpu.getBackground(), gpu.getForeground()
@@ -121,49 +177,73 @@ local function recursive_draw(node_key, x, y, w, h, screen_x, screen_y, screen_w
         end
     end
 
-    ---@type Element
-    local element = current_context.element
+    local prev_relative_start_x = prev_screen_x - prev_x
+    local prev_relative_start_y = prev_screen_y - prev_y
+    local prev_relative_end_x = prev_relative_start_x + prev_screen_w
+    local prev_relative_end_y = prev_relative_start_y + prev_screen_h
 
-    if element.type == "composable" then
-        if current_context.children[1] ~= nil then
-            recursive_draw(current_context.children[1], x, y, w, h, screen_x, screen_y, screen_w, screen_h)
-        end
+    local relative_start_x = screen_x - x
+    local relative_start_y = screen_y - y
+    local relative_end_x = relative_start_x + screen_w
+    local relative_end_y = relative_start_y + screen_h
+
+    if not (relative_start_x >= prev_relative_start_x and relative_start_y >= prev_relative_start_y and relative_end_x <= prev_relative_end_x and relative_end_y <= prev_relative_end_y) then
+        current_context.dirty = true
+    end
+
+    if prev_background ~= current_context.background or prev_foreground ~= current_context.foreground then
+        current_context.dirty = true
+    end
+
+    if not current_context.dirty then
+        gpu.bitblt(gpu.getActiveBuffer(), screen_x, screen_y, screen_w, screen_h, 0, prev_x + relative_start_x, prev_y + relative_start_y)
+        recursive_offset(node_key, x - prev_x, y - prev_y)
     else
-        element.draw(Renderer(x, y, w, h, screen_x, screen_y, screen_w, screen_h), util.map(current_context.children, function(child_key)
-            local child_context = context:obtain_element(child_key)
-            return {
-                w = child_context.w,
-                h = child_context.h,
-                draw_callback = function(child_x, child_y, child_w, child_h)
-                    local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
-                    
-                    local renderer_x = math.min(screen_x + screen_w - 1, math.max(screen_x, x + child_x - 1))
-                    local renderer_y = math.min(screen_y + screen_h - 1, math.max(screen_y, y + child_y - 1))
+        ---@type Element
+        local element = current_context.element
 
-                    local renderer_w = math.min(screen_w, screen_w + screen_x - renderer_x)
-                    local renderer_h = math.min(screen_h, screen_h + screen_y - renderer_y)
+        if element.type == "composable" then
+            if current_context.children[1] ~= nil then
+                recursive_draw(current_context.children[1], x, y, w, h, screen_x, screen_y, screen_w, screen_h)
+            end
+        else
+            current_context.dirty = false
+            element.draw(Renderer(x, y, w, h, screen_x, screen_y, screen_w, screen_h), util.map(current_context.children, function(child_key)
+                local child_context = context:obtain_element(child_key)
+                return {
+                    w = child_context.w,
+                    h = child_context.h,
+                    draw_callback = function(child_x, child_y, child_w, child_h)
+                        local old_background, old_foreground = gpu.getBackground(), gpu.getForeground()
+                        
+                        local renderer_x = math.min(screen_x + screen_w - 1, math.max(screen_x, x + child_x - 1))
+                        local renderer_y = math.min(screen_y + screen_h - 1, math.max(screen_y, y + child_y - 1))
 
-                    renderer_w = math.min(renderer_w, x + child_x - 1 + child_context.w - renderer_x)
-                    renderer_h = math.min(renderer_h, y + child_y - 1 + child_context.h - renderer_y)
-                    
-                    renderer_w = math.min(renderer_w, renderer_x + child_context.w - (x + child_x - 1))
-                    renderer_h = math.min(renderer_h, renderer_y + child_context.h - (y + child_y - 1))
+                        local renderer_w = math.min(screen_w, screen_w + screen_x - renderer_x)
+                        local renderer_h = math.min(screen_h, screen_h + screen_y - renderer_y)
 
-                    if child_w ~= nil then
-                        renderer_w = math.min(renderer_w, x + child_x - 1 + child_w - renderer_x)
+                        renderer_w = math.min(renderer_w, x + child_x - 1 + child_context.w - renderer_x)
+                        renderer_h = math.min(renderer_h, y + child_y - 1 + child_context.h - renderer_y)
+                        
+                        renderer_w = math.min(renderer_w, renderer_x + child_context.w - (x + child_x - 1))
+                        renderer_h = math.min(renderer_h, renderer_y + child_context.h - (y + child_y - 1))
+
+                        if child_w ~= nil then
+                            renderer_w = math.min(renderer_w, x + child_x - 1 + child_w - renderer_x)
+                        end
+
+                        if child_h ~= nil then
+                            renderer_h = math.min(renderer_h, y + child_y - 1 + child_h - renderer_y)
+                        end
+
+                        recursive_draw(child_key, x + child_x - 1, y + child_y - 1, child_context.w, child_context.h, renderer_x, renderer_y, renderer_w, renderer_h)
+
+                        gpu.setBackground(old_background)
+                        gpu.setForeground(old_foreground)
                     end
-
-                    if child_h ~= nil then
-                        renderer_h = math.min(renderer_h, y + child_y - 1 + child_h - renderer_y)
-                    end
-
-                    recursive_draw(child_key, x + child_x - 1, y + child_y - 1, child_context.w, child_context.h, renderer_x, renderer_y, renderer_w, renderer_h)
-
-                    gpu.setBackground(old_background)
-                    gpu.setForeground(old_foreground)
-                end
-            }
-        end))
+                }
+            end))
+        end
     end
 end
 
@@ -171,17 +251,19 @@ end
 local function render(node_key)
     local status, err = pcall(function()
         context:set_element(node_key)
-        context:set_not_rendered(node_key)
+        
+        local node_context = context:obtain_element(node_key)
+        node_context.element.disable_memo = true
+        
+        context.events[node_key] = nil
         context.event_areas = util.array_filter(context.event_areas, function(value)
             return context.events[value.node_key] ~= nil
         end)
-        
-        local node_context = context:obtain_element(node_key)
-        
+
         local prev_w, prev_h = node_context.w, node_context.h
         local node_info = recursive_build(node_context.element)
 
-        context:remove_not_rendered()
+        context:remove_not_rendered(node_key)
 
         local parent_key = node_context.parent_key
         if node_info ~= nil then
@@ -213,12 +295,17 @@ local function render(node_key)
     end
 end
 
----@param start_node fun(): Element | "nil"
-function gui.start(start_node)
+---@generic T
+---@param start_node fun(props: T): Element | "nil"
+---@param props T
+function gui.start(start_node, props)
     local status, err = pcall(function()
         context = Context()
         
-        local parent_element = gui.create_element(start_node, {})
+        local parent_element = gui.create_element{
+            element = start_node,
+            props = props
+        }
         local parent_key = util.func_tostring(start_node)
         local parent_context = context:obtain_element(parent_key)
         parent_context.element = parent_element
@@ -229,7 +316,7 @@ function gui.start(start_node)
         parent_context.background, parent_context.foreground = 0xFFFFFF, 0x000000
 
         context.parent = parent_key
-        local child_info = recursive_build(start_node())
+        local child_info = recursive_build(start_node(props))
         
         if child_info ~= nil then
             parent_context.children = { child_info.node_key }
@@ -244,8 +331,7 @@ function gui.start(start_node)
             -- TODO: replace with functions
             local id, screen_address, x, y, direction_or_button, player_name = event.pullMultiple("touch", "scroll", "interrupted")
             if id == "interrupted" then
-                context:set_not_rendered(parent_key)
-                context:remove_not_rendered()
+                context:cleanup()
                 break
             elseif id == "touch" then
                 for i = #context.event_areas, 1, -1 do
@@ -253,7 +339,7 @@ function gui.start(start_node)
                     if area ~= nil and area.event == "on_click" and x >= area.x and x < area.x + area.w and y >= area.y and y < area.y + area.h then
                         local node_context = context:obtain_element(area.node_key)
                         context.events[area.node_key].on_click(player_name, direction_or_button, x - node_context.x + 1, y - node_context.y + 1, node_context.w, node_context.h, node_context.screen_w, node_context.screen_h)
-                        i = 0
+                        break
                     end
                 end
             elseif id == "scroll" then
@@ -262,7 +348,7 @@ function gui.start(start_node)
                     if area ~= nil and area.event == "on_scroll" and x >= area.x and x < area.x + area.w and y >= area.y and y < area.y + area.h then
                         local node_context = context:obtain_element(area.node_key)
                         context.events[area.node_key].on_scroll(player_name, direction_or_button, x - node_context.x + 1, y - node_context.y + 1, node_context.w, node_context.h, node_context.screen_w, node_context.screen_h)
-                        i = 0
+                        break
                     end
                 end
             end
@@ -272,6 +358,7 @@ function gui.start(start_node)
     if not status then
         gpu.freeAllBuffers()
         print(err)
+        context:cleanup()
     end
 end
 
@@ -313,7 +400,7 @@ function gui.use_effect(effect, dependencies)
     end
 
     local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
-        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+        return current_cache.dependencies[index] ~= dependency
     end)
 
     if dependencies_changed then
@@ -343,7 +430,7 @@ function gui.use_memo(memo_func, dependencies)
     end
 
     local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
-        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+        return current_cache.dependencies[index] ~= dependency
     end)
 
     if dependencies_changed then
@@ -371,7 +458,7 @@ function gui.use_callback(callback, dependencies)
     end
 
     local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
-        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+        return current_cache.dependencies[index] ~= dependency
     end)
 
     if dependencies_changed then
@@ -398,7 +485,7 @@ function gui.animate_state(dependencies)
     end
 
     local dependencies_changed = current_cache.dependencies == nil or dependencies == nil or util.any(dependencies, function (dependency, index)
-        return current_cache.dependencies == nil or current_cache.dependencies[index] ~= dependency
+        return current_cache.dependencies[index] ~= dependency
     end)
 
     if dependencies_changed then

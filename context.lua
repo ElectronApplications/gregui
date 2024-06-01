@@ -6,6 +6,7 @@ local util = require("gregui.util")
 
 ---@class ContextElement
 ---@field rendered boolean
+---@field dirty boolean
 ---@field states any[]
 ---@field cache { dependencies: any[]?, cleanup: function?, value: any? }[]
 ---@field element Element
@@ -37,7 +38,9 @@ local util = require("gregui.util")
 ---@field element_present fun(self: Context, node_key: string): boolean
 ---@field obtain_element fun(self: Context, node_key: string): ContextElement
 ---@field set_not_rendered fun(self, node_key: string)
----@field remove_not_rendered fun(self)
+---@field set_not_rendered_recursive fun(self, node_key: string)
+---@field remove_not_rendered fun(self, node_key: string)
+---@field cleanup fun(self)
 
 ---@return Context
 return function()
@@ -82,6 +85,7 @@ return function()
         if context_element == nil then
             context_element = {
                 rendered = true,
+                dirty = true,
                 states = {},
                 cache = {},
                 element = {},
@@ -107,6 +111,15 @@ return function()
 
     function Context.set_not_rendered(self, node_key)
         local element = self:obtain_element(node_key)
+        for _, child in pairs(element.children) do
+            local child_context = self:obtain_element(child)
+            child_context.rendered = false
+            child_context.events = nil
+        end
+    end
+
+    function Context.set_not_rendered_recursive(self, node_key)
+        local element = self:obtain_element(node_key)
         element.rendered = false
         self.events[node_key] = nil
         for _, child in pairs(element.children) do
@@ -114,7 +127,15 @@ return function()
         end
     end
 
-    function Context.remove_not_rendered(self)
+    function Context.remove_not_rendered(self, node_key)
+        local element = self:obtain_element(node_key)
+        for _, child in pairs(element.children) do
+            local child_context = self:obtain_element(child)
+            if not child_context.rendered then
+                self:set_not_rendered_recursive(child)
+            end
+        end
+
         self.elements = util.filter(self.elements, function(element)
             if not element.rendered then
                 for _, cache in pairs(element.cache) do
@@ -126,6 +147,17 @@ return function()
 
             return element.rendered
         end)
+    end
+
+    function Context.cleanup(self)
+        for _, element in pairs(self.elements) do
+            for _, cache in pairs(element.cache) do
+                if cache.cleanup ~= nil then
+                    cache.cleanup()
+                end
+            end
+        end
+        self.elements = {}
     end
 
     return Context
